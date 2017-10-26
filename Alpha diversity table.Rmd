@@ -1,0 +1,2900 @@
+---
+  title: "Soil_analysis_code"
+author: "Emilee Williams"
+date: "31 May 2017"
+output:
+pdf_document:
+fig_caption: yes
+fig_height: 7
+fig_width: 7
+---
+  
+  #Pre-processing summary
+  All data was processed in Qiime, clustered at 97% sequence similarity and assigned taxonomy against SILVA 123. Libraries were subsampled and rarefied (to 12000 reads) ten times.  OTU tables generated were then combined, values rounded and the new data used for downstream analysis in R as shown below. 
+
+This analysis was done using a revised mapping file with corrected classification.
+
+```{r global_options, echo=FALSE, results='hide'}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.align='center', results='hide', echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+
+```{r Load libraries and data}
+library(phyloseq)
+library(ggplot2)
+library(plyr)
+library(scales)
+library(reshape2)
+library(RColorBrewer)
+library(grid)
+library(ggthemes)
+
+setwd("/Users/moraleslab/Documents/Thesis/")
+uzdir <- "/Users/moraleslab/Documents/Thesis/"
+otutable_biom_file <- paste("/Users/moraleslab/Documents/Thesis/", "NZSoils_12000_merged_otu_table_json.biom", sep = "")
+map_file <- paste("/Users/moraleslab/Documents/Thesis/", "md new.txt", sep = "")
+```
+
+
+```{r Create phyloseq object}
+# Now import the .biom-formatted otu_table-tax_table file.
+
+biom_otu_tax <- import_biom(otutable_biom_file)
+
+# Add sample data to the dataset using merge
+bmsd <- import_qiime_sample_data(map_file)
+class(bmsd)
+dim(bmsd)
+sample_data(bmsd)
+biom_otu_tax
+
+
+
+#Merge into phyloseq format
+All_phyloseq <- merge_phyloseq(biom_otu_tax, bmsd)
+All_phyloseq
+All_phyloseq0 = All_phyloseq
+                          
+#Subset and remove extra data
+NZsoil_phyloseq = subset_samples(All_phyloseq, Keep == "Yes")
+```
+
+```{r Attached OTU ID}
+tax_table(NZsoil_phyloseq) <- cbind(tax_table(NZsoil_phyloseq), OTU=taxa_names(NZsoil_phyloseq))
+```
+
+```{r Rename Ranks}
+colnames(tax_table(NZsoil_phyloseq)) = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species", "OTU")
+tax_table(NZsoil_phyloseq) =gsub("D_1__", "", tax_table(NZsoil_phyloseq))
+tax_table(NZsoil_phyloseq) =gsub("D_5__", "", tax_table(NZsoil_phyloseq))
+
+```
+
+#####Create average result for multiple rarefaction by transforming data using (divide by 10) and check counts per sample
+```{r Create average result for multiple rarefaction by transforming data using (divide by 10), results='markup'}
+NZsoil_phyloseq = transform_sample_counts(NZsoil_phyloseq, function(x) x/10)
+sample_sums(NZsoil_phyloseq)
+```
+
+##### Round and confirm count number
+```{r Round and confirm count number, results='markup'}
+NZsoil_phyloseq = transform_sample_counts(NZsoil_phyloseq, round)
+sample_sums(NZsoil_phyloseq)
+NZsoil_phyloseq = prune_samples(sample_sums(NZsoil_phyloseq)>=1, NZsoil_phyloseq)
+sample_sums(NZsoil_phyloseq)
+
+```
+
+Check that all OTUs have representative counts  
+For here taxa = OTU  
+__Commands interpretation:__  
+_Total number of taxa in dataset:_ sum(taxa_sums(NZsoil_phyloseq) > 0)   
+
+_Any taxa with no hits:_ any(taxa_sums(NZsoil_phyloseq)== 0)
+
+```{r identify taxa with only zeros, results='markup', echo=TRUE}
+sum(taxa_sums(NZsoil_phyloseq) > 0)
+any(taxa_sums(NZsoil_phyloseq)== 0)
+sum(taxa_sums(NZsoil_phyloseq) == 0)
+any(taxa_sums(NZsoil_phyloseq) > 1)
+sum(taxa_sums(NZsoil_phyloseq) > 1)
+any(taxa_sums(NZsoil_phyloseq) < 1)
+sum(taxa_sums(NZsoil_phyloseq) < 1)
+```
+
+#####Prune taxa with less than 1 count and check taxa numbers again
+```{r  Save original file and create new file with only present (no zeroes) taxa, results='markup', echo=TRUE}
+
+#Create new file with only present (no zeroes) taxa
+
+NZsoil_phyloseq = prune_taxa(taxa_sums(NZsoil_phyloseq) > 1, NZsoil_phyloseq)
+any(sample_sums(NZsoil_phyloseq) == 0)
+any(sample_sums(NZsoil_phyloseq) > 0)
+sum(taxa_sums(NZsoil_phyloseq) > 0)
+any(sample_sums(NZsoil_phyloseq) < 1)
+sum(taxa_sums(NZsoil_phyloseq) < 1)
+
+save(NZsoil_phyloseq, file="/Users/emileewilliams/Documents/NEW THESIS/")
+NZsoil_phyloseq <- "/Users/emileewilliams/Documents/NEW THESIS/NZsoil_phyloseq.RData"
+load(NZsoil_phyloseq)
+```
+
+###Compare sequences per sample or OTU
+```{r Compare sequences per sample or OTU}
+readsumsdf = data.frame(nreads = sort(taxa_sums(NZsoil_phyloseq), TRUE), sorted = 1:ntaxa(NZsoil_phyloseq), 
+                        type = "OTU")
+readsumsdf = rbind(readsumsdf, data.frame(nreads = sort(sample_sums(NZsoil_phyloseq), 
+                                                        TRUE), sorted = 1:nsamples(NZsoil_phyloseq), type = "Samples"))
+title = "Total number of reads"
+p = ggplot(readsumsdf, aes(x = sorted, y = nreads)) + geom_bar(stat = "identity")
+p + ggtitle(title) + scale_y_log10() + facet_wrap(~type, 1, scales = "free")
+```
+
+
+```{r}
+sample_variables(NZsoil_phyloseq)
+```
+
+```{r color shape settings}
+pd <- position_dodge(0.1) # move dots .01 to the left and right to avoid overlap
+```
+
+```{r rainfall vs island}
+Rainfall_Lat <- ggplot(alpha_meta, aes(x=Lat, y=Rainfall)) + 
+  geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Lat") +
+  labs(y = expression ("Rainfall")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_Lat_plot <-Rainfall_Lat +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_Lat_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_Lat_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+```
+
+#Calculate alpha diversity
+```{r Calculate alpha diversity [Richness, Shannon]}
+alpha_summary <- estimate_richness(NZsoil_phyloseq, measures = c("Observed", "Shannon"))
+alpha_meta <- data.frame(alpha_summary, sample_data(NZsoil_phyloseq))
+```
+
+```{r Alpha diversity by pH}
+#plot by pH
+
+alpha_pH_plot=plot_richness(NZsoil_phyloseq, x = "pH", measures = c("Observed", "Shannon")) + geom_point(size=2, aes(colour=LandUse)) + geom_smooth(method = "lm") + theme(text = element_text(size = 18)) + theme(axis.title.x = element_blank(),
+                axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12),
+                axis.text.y = element_text(colour = "black", size=18),
+                axis.title.y = element_text(face="bold",size=16),
+                plot.title = element_text(size = 18),
+                legend.title =element_text(size = 18),
+                legend.text = element_text(size = 18),
+                legend.position="right",
+                legend.key.size = unit(0.50, "cm"),
+                strip.text.x = element_text(size=18, face="bold"),
+                strip.text.y = element_text(size=18, face="bold"),
+                panel.background = element_blank(),
+                panel.border = element_rect(fill = NA, colour = "black"),
+                strip.background = element_rect(colour="black")) 
+
+alpha_pH_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/alpha_pH_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by pH
+
+
+pH_Shan <- ggplot(alpha_meta, aes(x=pH, y=Shannon)) + 
+  geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("Shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_Shan_plot <-pH_Shan +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_Shan_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_Shan_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Observed by pH
+
+pH_Obs <- ggplot(alpha_meta, aes(x=pH, y=Observed)) + 
+  geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("Observed")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_Obs_plot <-pH_Obs +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_Obs_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_Obs_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Observed by pH seperated by region
+
+
+pH_rich <- ggplot(alpha_meta, aes(x=pH, y=Observed)) + 
+  facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_Obs_Region_plot <-pH_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_Obs_Region_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_Obs_Region_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+###Observed by pH seperated by Island
+
+pH_rich <- ggplot(alpha_meta, aes(x=pH, y=Observed)) + 
+  facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_obs_island_plot <-pH_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_obs_island_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_obs_island_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+###Observed by pH seperated by Soil Order
+
+pH_rich <- ggplot(alpha_meta, aes(x=pH, y=Observed)) + 
+  facet_grid(. ~ SoilOrder, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=SoilOrder)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_obs_SoilOrder_plot <-pH_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_obs_SoilOrder_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_obs_SoilOrder_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by pH, sperated by region
+
+
+pH_shan_region <- ggplot(alpha_meta, aes(x=pH, y=Shannon)) + 
+  facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_shan_region_plot <-pH_shan_region +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_shan_region_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_shan_region_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by pH, sperated by Island
+
+pH_shan_Island <- ggplot(alpha_meta, aes(x=pH, y=Shannon)) + 
+  facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_shan_Island_plot <-pH_shan_Island +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_shan_Island_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_shan_Island_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by pH, sperated by SoilOrder
+
+pH_shan_SoilOrder <- ggplot(alpha_meta, aes(x=pH, y=Shannon)) + 
+  facet_grid(. ~ SoilOrder, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=SoilOrder)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_shan_SoilOrder_plot <-pH_shan_SoilOrder +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_shan_SoilOrder_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_shan_SoilOrder_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by pH, sperated by LandUse
+
+
+pH_shan_LandUse <- ggplot(alpha_meta, aes(x=pH, y=Shannon)) + 
+  facet_grid(. ~ LandUse, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=LandUse)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_shan_LandUse_plot <-pH_shan_LandUse +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_shan_LandUse_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_shan_LandUse_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Observed by pH seperated by LandUse
+
+
+pH_rich <- ggplot(alpha_meta, aes(x=pH, y=Observed)) + 
+  facet_grid(. ~ LandUse, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=LandUse)) + 
+  geom_smooth(method = "lm") +         
+  xlab("pH") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_Obs_LandUse_plot <-pH_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+pH_Obs_LandUse_plot
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_Obs_LandUse_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+
+```
+
+```{r Alpha diversity by Rainfall}
+
+#plot by Rainfall
+
+alpha_Rainfall_plot=plot_richness(NZsoil_phyloseq, x = "Rainfall", measures = c("Observed", "Shannon")) + geom_point(size=2, aes(colour=Island)) + geom_smooth(method = "lm") + theme(text = element_text(size = 18)) + theme(axis.title.x = element_blank(),
+                axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12),
+                axis.text.y = element_text(colour = "black", size=18),
+                axis.title.y = element_text(face="bold",size=16),
+                plot.title = element_text(size = 18),
+                legend.title =element_text(size = 18),
+                legend.text = element_text(size = 18),
+                legend.position="right",
+                legend.key.size = unit(0.50, "cm"),
+                strip.text.x = element_text(size=18, face="bold"),
+                strip.text.y = element_text(size=18, face="bold"),
+                panel.background = element_blank(),
+                panel.border = element_rect(fill = NA, colour = "black"),
+                strip.background = element_rect(colour="black")) 
+
+alpha_Rainfall_plot
+
+ ggsave("/Users/moraleslab/Documents/Thesis/thesis save/alpha_Rainfall_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+ 
+#Rainfall shan
+
+Rainfall_Shan <- ggplot(alpha_meta, aes(x=Rainfall, y=Shannon)) + 
+  geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("Shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_Shan_plot <-Rainfall_Shan +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_Shan_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_Shan_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Observed by Rainfall
+
+Rainfall_Obs <- ggplot(alpha_meta, aes(x=Rainfall, y=Observed)) + 
+  geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("Observed")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_Obs_plot <-Rainfall_Obs +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_Obs_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_Obs_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+
+#plot by rainfall
+#Observed by Rainfall seperated by region
+
+
+Rainfall_rich <- ggplot(alpha_meta, aes(x=Rainfall, y=Observed)) + 
+  facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_Obs_Region_plot <-Rainfall_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_Obs_Region_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_Obs_Region_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+###Observed by Rainfall seperated by Island
+
+Rainfall_rich <- ggplot(alpha_meta, aes(x=Rainfall, y=Observed)) + 
+  facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_obs_island_plot <-Rainfall_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_obs_island_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_obs_island_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+###Observed by Rainfall seperated by Soil Order
+
+Rainfall_rich <- ggplot(alpha_meta, aes(x=Rainfall, y=Observed)) + 
+  facet_grid(. ~ SoilOrder, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=SoilOrder)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_obs_SoilOrder_plot <-Rainfall_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_obs_SoilOrder_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_obs_SoilOrder_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Shannon by Rainfall, sperated by region
+
+Rainfall_shan_region <- ggplot(alpha_meta, aes(x=Rainfall, y=Shannon)) + 
+  facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Region)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_shan_region_plot <-Rainfall_shan_region +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_shan_region_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_shan_region_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by Rainfall, sperated by Island
+
+Rainfall_shan_Island <- ggplot(alpha_meta, aes(x=Rainfall, y=Shannon)) + 
+  facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_shan_Island_plot <-Rainfall_shan_Island +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_shan_Island_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_shan_Island_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by Rainfall, sperated by SoilOrder
+
+Rainfall_shan_SoilOrder <- ggplot(alpha_meta, aes(x=Rainfall, y=Shannon)) + 
+  facet_grid(. ~ SoilOrder, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=SoilOrder)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_shan_SoilOrder_plot <-Rainfall_shan_SoilOrder +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_shan_SoilOrder_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_shan_SoilOrder_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Shannon by Rainfall, sperated by LandUse
+
+
+Rainfall_shan_LandUse <- ggplot(alpha_meta, aes(x=Rainfall, y=Shannon)) + 
+  facet_grid(. ~ LandUse, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=LandUse)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("shannon")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_shan_LandUse_plot <-Rainfall_shan_LandUse +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_shan_LandUse_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_shan_LandUse_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Observed by Rainfall seperated by LandUse
+
+
+Rainfall_rich <- ggplot(alpha_meta, aes(x=Rainfall, y=Observed)) + 
+  facet_grid(. ~ LandUse, drop = TRUE, space = "fixed", scales = "free")+ geom_point(size=2, aes(colour=LandUse)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Rainfall") +
+  labs(y = expression ("Richness")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_Obs_LandUse_plot <-Rainfall_rich +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=45, colour = "black", vjust=1, hjust = 0.5, size=12), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_Obs_LandUse_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_Obs_LandUse_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+```
+
+``` {r Alpha Diversity by Land Use}
+
+#Plot by Land Use
+
+alpha_LandUse_plot =plot_richness(NZsoil_phyloseq, x = "LandUse", measures = c("Observed", "Shannon")) + geom_point(size=4, aes(colour=pH)) + scale_colour_continuous(low="blue", high="yellow") + geom_smooth(method = "lm") + geom_boxplot() + theme(text = element_text(size = 18)) + theme(axis.title.x = element_blank(),
+                      axis.text.x = element_text(angle=75, colour = "black", vjust=1, hjust = 1, size=18),
+                      axis.text.y = element_text(colour = "black", size=18),
+                      axis.title.y = element_text(face="bold",size=16),
+                      plot.title = element_text(size = 18),
+                      legend.title =element_text(size = 18),
+                      legend.text = element_text(size = 18),
+                      legend.position="right",
+                      legend.key.size = unit(0.50, "cm"),
+                      strip.text.x = element_text(size=18, face="bold"),
+                      strip.text.y = element_text(size=18, face="bold"),
+                      panel.background = element_blank(),
+                      panel.border = element_rect(fill = NA, colour = "black"),
+                      strip.background = element_rect(colour="black")) 
+
+alpha_LandUse_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/alpha_LandUse_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+```{r Alpha diversity by LandUse}
+#plot by LandUse
+
+#Observed by LandUse, seperated by Island
+LandUse_Obs_Island_Plot = plot_richness(NZsoil_phyloseq, x = "LandUse", measures = c("Observed", "Shannon"), sortby = "Observed") + facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=LandUse)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+LandUse_Obs_Island_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/LandUse_Obs_Island_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Shannon by LandUse, seperated by Island
+LandUse_Shan_Island_Plot = plot_richness(NZsoil_phyloseq, x = "LandUse", measures = c("Observed", "Shannon"), sortby = "Shannon") + facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=LandUse)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+LandUse_Shan_Island_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/LandUse_Shan_Island_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Observed by LandUse, seperated by Region
+LandUse_Obs_Region_Plot = plot_richness(NZsoil_phyloseq, x = "LandUse", measures = c("Observed", "Shannon"), sortby = "Observed") + facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=LandUse)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+LandUse_Obs_Region_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/LandUse_Obs_Region_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Shannon by LandUse, seperated by Region
+LandUse_Shan_Region_Plot = plot_richness(NZsoil_phyloseq, x = "LandUse", measures = c("Observed", "Shannon"), sortby = "Shannon") + facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=LandUse)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+LandUse_Shan_Region_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/LandUse_Shan_Region_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+```
+
+```{r Alpha diversity by SoilOrder}
+#plot by SoilOrder
+
+#Observed by SoilOrder, seperated by Island
+SoilOrder_Obs_Island_Plot = plot_richness(NZsoil_phyloseq, x = "SoilOrder", measures = c("Observed", "Shannon"), sortby = "Observed") + facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=SoilOrder)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+SoilOrder_Obs_Island_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/SoilOrder_Obs_Island_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Shannon by SoilOrder, seperated by Island
+SoilOrder_Shan_Island_Plot = plot_richness(NZsoil_phyloseq, x = "SoilOrder", measures = c("Observed", "Shannon"), sortby = "Shannon") + facet_grid(. ~ Island, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=SoilOrder)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+SoilOrder_Shan_Island_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/SoilOrder_Shan_Island_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Observed by SoilOrder, seperated by Region
+SoilOrder_Obs_Region_Plot = plot_richness(NZsoil_phyloseq, x = "SoilOrder", measures = c("Observed", "Shannon"), sortby = "Observed") + facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=SoilOrder)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+SoilOrder_Obs_Region_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/SoilOrder_Obs_Region_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Shannon by SoilOrder, seperated by Region
+SoilOrder_Shan_Region_Plot = plot_richness(NZsoil_phyloseq, x = "SoilOrder", measures = c("Observed", "Shannon"), sortby = "Shannon") + facet_grid(. ~ Region, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=SoilOrder)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+SoilOrder_Shan_Region_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/SoilOrder_Shan_Region_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Observed by SoilOrder, seperated by LandUse
+SoilOrder_Obs_LandUse_Plot = plot_richness(NZsoil_phyloseq, x = "SoilOrder", measures = c("Observed", "Shannon"), sortby = "Observed") + facet_grid(. ~ LandUse, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=SoilOrder)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+SoilOrder_Obs_LandUse_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/SoilOrder_Obs_LandUse_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Shannon by SoilOrder, seperated by LandUse
+SoilOrder_Shan_LandUse_Plot = plot_richness(NZsoil_phyloseq, x = "SoilOrder", measures = c("Observed", "Shannon"), sortby = "Shannon") + facet_grid(. ~ LandUse, drop = TRUE, space = "fixed", scales = "free") + theme_few() + theme(text = element_text(size=23), axis.text.x = element_text(angle = 90, hjust = 1)) + geom_point(size = 4, aes(colour=SoilOrder)) + geom_boxplot()
+z= p+ theme(axis.title.x = element_blank(),
+             axis.title.y = element_text(size=27), strip.text.x = element_text(size=32))
+SoilOrder_Shan_LandUse_Plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/SoilOrder_Shan_LandUse_Plot.pdf", width = 31.2, height = 20.4, units = "cm")
+```
+
+```{r Subsetting for stats}
+#Region subsets
+SubsetAuckland <-subset(alpha_meta, Region=="Auckland")
+
+SubsetBayofPlenty <-subset(alpha_meta, Region=="Bay of Plenty")
+
+SubsetCanterbury <-subset(alpha_meta, Region=="Canterbury")
+
+SubsetHawkesBay <-subset(alpha_meta, Region=="Hawkes Bay")
+
+SubsetManawatuWanganui <-subset(alpha_meta, Region=="Manawatu-Wanganui")
+
+SubsetMarlborough <-subset(alpha_meta, Region=="Marlborough")
+
+SubsetOtago <-subset(alpha_meta, Region=="Otago")
+
+SubsetNorthland <-subset(alpha_meta, Region=="Northland")
+
+SubsetSouthland <-subset(alpha_meta, Region=="Southland")
+
+SubsetTaranaki <-subset(alpha_meta, Region=="Taranaki")
+
+SubsetTasman <-subset(alpha_meta, Region=="Tasman")
+
+SubsetWaikato <-subset(alpha_meta, Region=="Waikato")
+
+SubsetWellington <-subset(alpha_meta, Region=="Wellington")
+
+SubsetWestCoast <-subset(alpha_meta, Region=="West Coast")
+
+#Island subsets
+SubsetNorthIsland <-subset(alpha_meta, Island=="North Island")
+
+SubsetSouthIsland <-subset(alpha_meta, Island=="South Island")
+
+#SoilOrder subsets
+
+SubsetBrown <-subset(alpha_meta, SoilOrder=="Brown")
+
+SubsetGley <-subset(alpha_meta, SoilOrder=="Gley")
+
+SubsetPallic <-subset(alpha_meta, SoilOrder=="Pallic")
+
+SubsetSemiarid <-subset(alpha_meta, SoilOrder=="Semiarid")
+
+SubsetRecent <-subset(alpha_meta, SoilOrder=="Recent")
+
+SubsetMelanic <-subset(alpha_meta, SoilOrder=="Melanic")
+
+SubsetUltic <-subset(alpha_meta, SoilOrder=="Ultic")
+
+SubsetGranular <-subset(alpha_meta, SoilOrder=="Granular")
+
+SubsetPodzol <-subset(alpha_meta, SoilOrder=="Podzol")
+
+SubsetAllophanic <-subset(alpha_meta, SoilOrder=="Allophanic")
+
+SubsetPumice <-subset(alpha_meta, SoilOrder=="Pumice")
+
+#LandUse Subsets
+
+SubsetDairy<-subset(alpha_meta, LandUse=="Dairy")
+
+SubsetHighCountry<-subset(alpha_meta, LandUse=="High Country")
+
+SubsetOther<-subset(alpha_meta, LandUse=="Other")
+
+```
+
+```{r Statistics for pH}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = alpha_meta)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = alpha_meta)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = alpha_meta)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = alpha_meta)
+```
+
+```{r Statistics for pH - Auckland}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetAuckland)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetAuckland)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetAuckland)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetAuckland)
+```
+
+```{r Statistics for pH- Bay of Plenty}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetBayofPlenty)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetBayofPlenty)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetBayofPlenty)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetBayofPlenty)
+```
+
+```{r Statistics for pH- Canterbury}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetCanterbury)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetCanterbury)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetCanterbury)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetCanterbury)
+```
+
+```{r Statistics for pH- Hawkes Bay}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetHawkesBay)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetHawkesBay)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetHawkesBay)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetHawkesBay)
+```
+
+```{r Statistics for pH- Manawatu Wanganui}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetManawatuWanganui)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetManawatuWanganui)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetManawatuWanganui)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetManawatuWanganui)
+```
+
+```{r Statistics for pH- Marlborough}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetMarlborough)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetMarlborough)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetMarlborough)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetMarlborough)
+```
+
+```{r Statistics for pH- Otago}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetOtago)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetOtago)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetOtago)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetOtago)
+```
+
+```{r Statistics for pH- Northland}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetNorthland)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetNorthland)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetNorthland)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetNorthland)
+```
+
+```{r Statistics for pH- Southland}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetSouthland)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetSouthland)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetSouthland)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetSouthland)
+```
+
+```{r Statistics for pH- Taranaki}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetTaranaki)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetTaranaki)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetTaranaki)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetTaranaki)
+```
+
+```{r Statistics for pH- Tasman}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetTasman)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetTasman)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetTasman)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetTasman)
+```
+
+```{r Statistics for pH- Waikato}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetWaikato)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetWaikato)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetWaikato)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetWaikato)
+```
+
+```{r Statistics for pH- Wellington}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetWellington)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetWellington)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetWellington)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetWellington)
+```
+
+```{r Statistics for pH- West Coast}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetWestCoast)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetWestCoast)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetWestCoast)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetWestCoast)
+```
+
+```{r Statistics for pH- North Island}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetNorthIsland)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetNorthIsland)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetNorthIsland)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetNorthIsland)
+```
+
+```{r Statistics for pH- South Island}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetSouthIsland)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetSouthIsland)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetSouthIsland)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetSouthIsland)
+```
+
+```{r Statistics for pH- Allophanic}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetAllophanic)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetAllophanic)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetAllophanic)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetAllophanic)
+```
+
+```{r Statistics for pH- Brown}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetBrown)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetBrown)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetBrown)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetBrown)
+```
+
+```{r Statistics for pH- Gley}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetGley)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetGley)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetGley)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetGley)
+```
+
+```{r Statistics for pH- Granular}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetGranular)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetGranular)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetGranular)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetGranular)
+```
+
+```{r Statistics for pH- Melanic}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetMelanic)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetMelanic)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetMelanic)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetMelanic)
+```
+
+```{r Statistics for pH- Pallic}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetPallic)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetPallic)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetPallic)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetPallic)
+```
+
+```{r Statistics for pH- Podzol}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetPodzol)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetPodzol)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetPodzol)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetPodzol)
+```
+
+```{r Statistics for pH- Pumice}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetPumice)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetPumice)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetPumice)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetPumice)
+```
+
+```{r Statistics for pH- Recent}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetRecent)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetRecent)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetRecent)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetRecent)
+```
+
+```{r Statistics for pH- Semiarid}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetSemiarid)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetSemiarid)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetSemiarid)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetSemiarid)
+```
+
+```{r Statistics for pH- Ultic}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetUltic)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetUltic)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetUltic)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetUltic)
+```
+
+```{r Statistics for Rainfall}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = alpha_meta)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = alpha_meta)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = alpha_meta)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = alpha_meta)
+```
+
+```{r Statistics for pH- Dairy}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetDairy)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetDairy)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetDairy)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetDairy)
+```
+
+```{r Statistics for pH- High Country}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetHighCountry)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetHighCountry)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetHighCountry)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetHighCountry)
+```
+
+```{r Statistics for pH- Other}
+#Shannon pH stats
+fit_Shan_pH <- lm(Shannon ~ pH, data = SubsetOther)
+summary(fit_Shan_pH)
+summary(fit_Shan_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and pH
+kruskal.test(Shannon ~ pH, data = SubsetOther)
+
+#Observed pH stats
+fit_Obs_pH <- lm(Observed ~ pH, data = SubsetOther)
+summary(fit_Obs_pH)
+summary(fit_Obs_pH)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ pH, data = SubsetOther)
+```
+
+```{r Statistics for Rainfall- Dairy}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetDairy)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetDairy)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetDairy)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetDairy)
+```
+
+```{r Statistics for Rainfall- High Country}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetHighCountry)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetHighCountry)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetHighCountry)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetHighCountry)
+```
+
+```{r Statistics for Rainfall- Other}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetOther)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetOther)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetOther)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetOther)
+```
+
+```{r Statistics for Rainfall - Auckland}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetAuckland)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetAuckland)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetAuckland)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetAuckland)
+```
+
+```{r Statistics for Rainfall- Bay of Plenty}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetBayofPlenty)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetBayofPlenty)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetBayofPlenty)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetBayofPlenty)
+```
+
+```{r Statistics for Rainfall- Canterbury}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetCanterbury)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetCanterbury)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetCanterbury)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetCanterbury)
+```
+
+```{r Statistics for Rainfall- Hawkes Bay}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetHawkesBay)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetHawkesBay)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetHawkesBay)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetHawkesBay)
+```
+
+```{r Statistics for Rainfall- Manawatu Wanganui}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetManawatuWanganui)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetManawatuWanganui)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetManawatuWanganui)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetManawatuWanganui)
+```
+
+```{r Statistics for Rainfall- Marlborough}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetMarlborough)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetMarlborough)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetMarlborough)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetMarlborough)
+```
+
+```{r Statistics for Rainfall- Otago}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetOtago)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetOtago)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetOtago)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetOtago)
+```
+
+```{r Statistics for Rainfall- Northland}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetNorthland)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetNorthland)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetNorthland)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetNorthland)
+```
+
+```{r Statistics for Rainfall- Southland}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetSouthland)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetSouthland)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetSouthland)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetSouthland)
+```
+
+```{r Statistics for Rainfall- Taranaki}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetTaranaki)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetTaranaki)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetTaranaki)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetTaranaki)
+```
+
+```{r Statistics for Rainfall- Tasman}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetTasman)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetTasman)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetTasman)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetTasman)
+```
+
+```{r Statistics for Rainfall- Waikato}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetWaikato)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetWaikato)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetWaikato)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetWaikato)
+```
+
+```{r Statistics for Rainfall- Wellington}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetWellington)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetWellington)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetWellington)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetWellington)
+```
+
+```{r Statistics for Rainfall- West Coast}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetWestCoast)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetWestCoast)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetWestCoast)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetWestCoast)
+```
+
+```{r Statistics for Rainfall- North Island}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetNorthIsland)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetNorthIsland)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetNorthIsland)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetNorthIsland)
+```
+
+```{r Statistics for Rainfall- South Island}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetSouthIsland)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetSouthIsland)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetSouthIsland)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetSouthIsland)
+```
+
+```{r Statistics for Rainfall- Allophanic}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetAllophanic)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetAllophanic)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetAllophanic)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetAllophanic)
+```
+
+```{r Statistics for Rainfall- Brown}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetBrown)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetBrown)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetBrown)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetBrown)
+```
+
+```{r Statistics for Rainfall- Gley}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetGley)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetGley)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetGley)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetGley)
+```
+
+```{r Statistics for Rainfall- Granular}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetGranular)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetGranular)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetGranular)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetGranular)
+```
+
+```{r Statistics for Rainfall- Melanic}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetMelanic)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetMelanic)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetMelanic)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetMelanic)
+```
+
+```{r Statistics for Rainfall- Pallic}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetPallic)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetPallic)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetPallic)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetPallic)
+```
+
+```{r Statistics for Rainfall- Podzol}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetPodzol)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetPodzol)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetPodzol)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetPodzol)
+```
+
+```{r Statistics for Rainfall- Pumice}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetPumice)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetPumice)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetPumice)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetPumice)
+```
+
+```{r Statistics for Rainfall- Recent}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetRecent)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetRecent)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetRecent)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetRecent)
+```
+
+```{r Statistics for Rainfall- Semiarid}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetSemiarid)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetSemiarid)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetSemiarid)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetSemiarid)
+```
+
+```{r Statistics for Rainfall- Ultic}
+#Shannon Rainfall stats
+fit_Shan_Rainfall <- lm(Shannon ~ Rainfall, data = SubsetUltic)
+summary(fit_Shan_Rainfall)
+summary(fit_Shan_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between shannon and Rainfall
+kruskal.test(Shannon ~ Rainfall, data = SubsetUltic)
+
+#Observed Rainfall stats
+fit_Obs_Rainfall <- lm(Observed ~ Rainfall, data = SubsetUltic)
+summary(fit_Obs_Rainfall)
+summary(fit_Obs_Rainfall)$r.squared
+
+##Kruskal-Wallis test for correlation between observed species and Rainfall
+kruskal.test(Observed ~ Rainfall, data = SubsetUltic)
+```
+
+```{r Statistics for SoilOrder}
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Land Use
+kruskal.test(Observed ~ LandUse, data = alpha_meta)
+kruskal.test(Shannon ~ LandUse, data = alpha_meta)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Auckland Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetAuckland)
+kruskal.test(Shannon ~ LandUse, data = SubsetAuckland)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Bay of Plenty Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetBayofPlenty)
+kruskal.test(Shannon ~ LandUse, data = SubsetBayofPlenty)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Canterbury Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetCanterbury)
+kruskal.test(Shannon ~ LandUse, data = SubsetCanterbury)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Hawkes Bay Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetHawkesBay)
+kruskal.test(Shannon ~ LandUse, data = SubsetHawkesBay)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Manawatu-Wanganui Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetManawatuWanganui)
+kruskal.test(Shannon ~ LandUse, data = SubsetManawatuWanganui)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Marlborough Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetMarlborough)
+kruskal.test(Shannon ~ LandUse, data = SubsetMarlborough)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Otago Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetOtago)
+kruskal.test(Shannon ~ LandUse, data = SubsetOtago)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Northland Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetNorthland)
+kruskal.test(Shannon ~ LandUse, data = SubsetNorthland)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Southland Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetSouthland)
+kruskal.test(Shannon ~ LandUse, data = SubsetSouthland)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Taranaki Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetTaranaki)
+kruskal.test(Shannon ~ LandUse, data = SubsetTaranaki)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Tasman Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetTasman)
+kruskal.test(Shannon ~ LandUse, data = SubsetTasman)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Waikato Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetWaikato)
+kruskal.test(Shannon ~ LandUse, data = SubsetWaikato)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Wellington Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetWellington)
+kruskal.test(Shannon ~ LandUse, data = SubsetWellington)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and West Coast Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetWestCoast)
+kruskal.test(Shannon ~ LandUse, data = SubsetWestCoast)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and North Island Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetNorthIsland)
+kruskal.test(Shannon ~ LandUse, data = SubsetNorthIsland)
+
+#Kruskal-Wallis test for correlation between observed/ shannon and South Island Island Land Use
+kruskal.test(Observed ~ LandUse, data = SubsetSouthIsland)
+kruskal.test(Shannon ~ LandUse, data = SubsetSouthIsland)
+```
+
+
+```{r Statistics for LandUse}
+
+#Kruskal-Wallis test for correlation between observed/ shannon and Land Use
+kruskal.test(Observed ~ LandUse, data = alpha_meta)
+kruskal.test(Shannon ~ LandUse, data = alpha_meta)
+```
+
+#Rainfall/ Lat each island 
+```{South Island raiinfall}
+Lat_Rainfall <- ggplot(SubsetSouthIsland, aes(x=Lat, y=Rainfall)) + 
+  geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Lat") +
+  labs(y = expression ("Rainfall")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Lat_Rainfall_SouthIsland_plot <-Lat_Rainfall +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Lat_Rainfall_SouthIsland_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Lat_Rainfall_SouthIsland_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+```
+
+```{North Island raiinfall}
+Lat_Rainfall <- ggplot(SubsetNorthIsland, aes(x=Lat, y=Rainfall)) + 
+  geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("Lat") +
+  labs(y = expression ("Rainfall")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+  scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Lat_Rainfall_NorthIsland_plot <-Lat_Rainfall +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Lat_Rainfall_NorthIsland_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Lat_Rainfall_NorthIsland_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+```
+
+#NMDS ordination 
+```{r NMDS ordination Bray Distance}
+library(vegan)
+library(ggrepel)
+library(ggplot2)
+
+NMDS.ord <- ordinate(NZsoil_phyloseq, "NMDS", "bray")
+```
+
+```{r NMDS ordination Stressplot Bray Distance}
+stressplot(NMDS.ord)
+dev.copy(pdf, "/Users/moraleslab/Documents/Thesis/plotsFigure1_stress.pdf", width=8,height=4)
+dev.off()
+```
+
+```{r NMDS ordination: Rainfall}
+
+
+NMDS_Rainfall = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "Rainfall", shape = "Island") + scale_colour_continuous(low="blue", high="yellow")
+
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_Rainfall_plot = NMDS_Rainfall + geom_point(size = 3) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_Rainfall_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_Rainfall_plot.pdf", width = 15.6, height = 10.2, units = "cm")
+```
+
+
+```{r NMDS ordination: Lat}
+
+
+NMDS_Lat = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "Lat") + scale_colour_continuous(low="blue", high="yellow")
+
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_Lat_plot = NMDS_Lat + geom_point(size = 3) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_Lat_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_Lat_plot.pdf", width = 15.6, height = 10.2, units = "cm")
+```
+
+```{r NMDS ordination: Long}
+
+
+NMDS_Long = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "Long") + scale_colour_continuous(low="blue", high="yellow")
+
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_Long_plot = NMDS_Long + geom_point(size = 3) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_Long_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_Long_plot.pdf", width = 15.6, height = 10.2, units = "cm")
+```
+
+```{r NMDS ordination: pH}
+
+
+NMDS_pH = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "pH", shape = "Island") + scale_colour_continuous(low="blue", high="yellow")
+
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_pH_plot = NMDS_pH + geom_point(size = 3) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_pH_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_pH_plot.pdf", width = 15.6, height = 10.2, units = "cm")
+```
+
+```{r NMDS ordination: LandUse}
+
+
+NMDS_LandUse = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "LandUse") + scale_colour_discrete()
+
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_LandUse_plot = NMDS_LandUse + geom_point(size = 2) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_LandUse_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_LandUse_plot.pdf", width = 15.6, height = 10.2, units = "cm")
+```
+
+```{r NMDS ordination: SoilOrder}
+
+cols<- c("Allophanic"="red", "Brown"="Brown", Gley= "lightgreen", Granular="yellow", Melanic="Black", Pallic="pink", Podzol="blue", Pumice="darkgreen", Recent="orange", Semiarid="purple", Ultic="darkblue")
+NMDS_SoilOrder = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "SoilOrder") + scale_colour_manual(values=cols)
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_SoilOrder_plot = NMDS_SoilOrder + geom_point(size = 2) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_SoilOrder_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_SoilOrder_plot.pdf", width = 15.6, height = 10.2, units = "cm")
+```
+
+```{r NMDS ordination: Region}
+
+cols<- c("Auckland"="red", "Bay of Plenty"="Brown", "Canterbury"= "lightgreen", "Hawkes Bay"="yellow", "Manawatu-Wanganui"="Black", "Marlborough"="pink", "Northland"="blue", "Otago"="darkgreen", "Southland"="orange", "Taranaki"="purple", "Tasman"="darkblue", "Waikato"="palegoldenrod", "Wellington"="rosybrown4","West Coast"= "Tan2")
+NMDS_Region = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "Region") + scale_colour_manual(values=cols)
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_Region_plot = NMDS_Region + geom_point(size = 2) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_Region_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_Region_plot.pdf",  width = 15.6, height = 10.2, units = "cm")
+```
+
+```{r NMDS ordination: Island}
+
+cols<- c("North Island"="Black", "South Island"="pink")
+NMDS_Island = plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", color = "Island") + scale_colour_manual(values=cols)
+library(grid)
+
+my_grob = grobTree(textGrob("Stress = 0.2", x=0.1,  y=0.85, hjust=0,
+                            gp=gpar(col="Black", fontsize=18, fontface="italic")))
+
+
+NMDS_Island_plot = NMDS_Island + geom_point(size = 2) + theme(text = element_text(size = 16)) + theme(axis.title.x = element_text(face="bold",size=16),
+                         axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 1, size=14),
+                         axis.text.y = element_text(colour = "black", size=14),
+                         axis.title.y = element_text(face="bold",size=14),
+                         plot.title = element_text(size = 18),
+                         legend.title =element_text(size = 16),
+                         legend.text = element_text(size = 16),
+                         legend.position="right",
+                         legend.key.size = unit(0.50, "cm"),
+                         strip.text.x = element_text(size=12, face="bold"),
+                         strip.text.y = element_text(size=12, face="bold"),
+                         panel.background = element_blank(),
+                         panel.border = element_rect(fill = NA, colour = "black"),
+                         strip.background = element_rect(colour="black")) + annotation_custom(my_grob)
+
+NMDS_Island_plot  
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/NMDS_Island_plot.pdf", width = 15.6, height = 10.2, units = "cm")
+```
+
+```{r NMDS ordination: Beta diversity statistics}
+###Supportive statistics for continuous (Mantel) and discrete (Anosim)
+
+#Mantel pH
+NZsoil_phyloseq_dist <- distance(NZsoil_phyloseq, "bray")
+NZsoil_phyloseq_sd <- data.frame(sample_data(NZsoil_phyloseq))
+NZsoil_phyloseq_ph <- dist(NZsoil_phyloseq_sd$pH, method = "euclidean")
+NZsoil_phyloseq_phd <- as.matrix(NZsoil_phyloseq_ph)
+mantel(NZsoil_phyloseq_dist, NZsoil_phyloseq_phd, method = "pearson")
+
+#Mantel Rainfall
+NZsoil_phyloseq_Rainfall <- dist(NZsoil_phyloseq_sd$Rainfall, method = "euclidean")
+NZsoil_phyloseq_Rainfalld <- as.matrix(NZsoil_phyloseq_Rainfall)
+mantel(NZsoil_phyloseq_dist, NZsoil_phyloseq_Rainfalld, method = "pearson")
+
+#Mantel Lat
+NZsoil_phyloseq_Lat <- dist(NZsoil_phyloseq_sd$Lat, method = "euclidean")
+NZsoil_phyloseq_Latd <- as.matrix(NZsoil_phyloseq_Lat)
+mantel(NZsoil_phyloseq_dist, NZsoil_phyloseq_Latd, method = "pearson")
+
+#Mantel Long
+NZsoil_phyloseq_Long <- dist(NZsoil_phyloseq_sd$Long, method = "euclidean")
+NZsoil_phyloseq_Longd <- as.matrix(NZsoil_phyloseq_Long)
+mantel(NZsoil_phyloseq_dist, NZsoil_phyloseq_Longd, method = "pearson")
+
+#Anosim Island
+NZsoil_phyloseq_group = get_variable(NZsoil_phyloseq, "Island")
+NZsoil_phyloseq_ano = anosim(distance(NZsoil_phyloseq, "bray"), NZsoil_phyloseq_group)
+NZsoil_phyloseq_ano$signif
+NZsoil_phyloseq_ano$statistic
+
+#Anosim LandUse
+NZsoil_phyloseq_group = get_variable(NZsoil_phyloseq, "LandUse")
+NZsoil_phyloseq_ano = anosim(distance(NZsoil_phyloseq, "bray"), NZsoil_phyloseq_group)
+NZsoil_phyloseq_ano$signif
+NZsoil_phyloseq_ano$statistic
+
+
+#Anosim SoilOrder
+NZsoil_phyloseq_group = get_variable(NZsoil_phyloseq, "SoilOrder")
+NZsoil_phyloseq_ano = anosim(distance(NZsoil_phyloseq, "bray"), NZsoil_phyloseq_group)
+NZsoil_phyloseq_ano$signif
+NZsoil_phyloseq_ano$statistic
+
+
+#Anosim Region
+NZsoil_phyloseq_group = get_variable(NZsoil_phyloseq, "Region")
+NZsoil_phyloseq_ano = anosim(distance(NZsoil_phyloseq, "bray"), NZsoil_phyloseq_group)
+NZsoil_phyloseq_ano$signif
+NZsoil_phyloseq_ano$statistic
+
+
+```
+
+```{r NMDS ordination: pH/ NMDS1 and Rainfall/ NMDS2}
+#pH/ NMDS1
+five <- plot_ordination(NZsoil_phyloseq, NMDS.ord, type = "samples", justDF = TRUE)
+
+pH_NMDS1 <- ggplot(five, aes(x=NMDS1, y=pH)) + 
+  geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("NMDS1") +
+  labs(y = expression ("pH")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+pH_NMDS1_plot <-pH_NMDS1 +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+pH_NMDS1_plot
+
+
+
+#Stats for pH/ NMDS1
+
+fit_pH_NMDS1 <- lm(pH ~ NMDS1, data = five)
+summary(fit_pH_NMDS1)
+summary(fit_pH_NMDS1)$r.squared
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/pH_NMDS1_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+
+#Rainfall/ NMDS2
+
+Rainfall_NMDS2 <- ggplot(five, aes(x=NMDS2, y=Rainfall)) + 
+  geom_point(size=2, aes(colour=Island)) + 
+  geom_smooth(method = "lm") +         
+  xlab("NMDS2") +
+  labs(y = expression ("Rainfall")) +
+  expand_limits(y=0) +                        
+  scale_y_continuous() +
+scale_x_continuous() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())  
+
+Rainfall_NMDS2_plot <-Rainfall_NMDS2 +
+  theme(axis.title.x = element_text(size=18),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+Rainfall_NMDS2_plot
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/Rainfall_NMDS2_plot.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#Stats for Rainfall/ NMDS2
+
+fit_Rainfall_NMDS2 <- lm(Rainfall ~ NMDS2, data = five)
+summary(fit_Rainfall_NMDS2)
+summary(fit_Rainfall_NMDS2)$r.squared
+
+```
+
+```{r Plot phylum by variables (stackplot)}}
+library(ggplot2)
+library(vegan)
+library(plyr)
+library(dplyr)
+library(scales)
+library(reshape2)
+library(RColorBrewer)
+library(grid)
+library(phyloseq)
+# melt to long format (for ggploting) 
+# prune out phyla below 1% in each sample
+NZsoil_over1 <- NZsoil_phyloseq %>%
+  tax_glom(taxrank = "Phylum")  %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  psmelt() %>%      
+  filter(Abundance > 0.01)   %>%                      
+  arrange(Phylum)
+
+
+#comm comp by island
+
+d= ggplot(NZsoil_over1,aes(x=as.factor(Island),y=Abundance,fill=Phylum))+ geom_bar(stat="identity",position="fill") +  scale_y_continuous(labels = percent_format())
+
+b= d+ ylab("Relative Abundance")
+
+a= b+ scale_fill_manual(name="Phylum",values = c("grey26", "royalblue", "chartreuse3",  "red", "darkorange","cyan2", "darkgreen", "deepskyblue", "mediumorchid3","#89C5DA", "#DA5724", "#74D944", "#C84248", "#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030",   "#AD6F3B", "#CD9BCD", "#D14285", "#6DDE88", "#652926", "#7FDCC0", "#8569D5", "#5E738F", "#D1A33D", "#8A7C64", "#599861", "blue4", "yellow1", "violetred", "#990000", "#99CC00", "#003300", "#00CCCC", "#9966CC", "#993366", "#990033", "#4863A0", "#000033", "#330000", "#00CC99", "#00FF33", "#00CCFF", "#FF9933", "#660066", "#FF0066", "#330000", "#CCCCFF", "#3399FF", "#66FFFF", "#B5EAAA","#FFE87C"))
+
+z= a+ theme(axis.title.x = element_blank(),
+            axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18),
+            axis.text.y = element_text(colour = "black", size=18),
+            axis.title.y = element_text(face="bold",size=18),
+            plot.title = element_text(size = 18),
+            legend.title =element_text(size = 18),
+            legend.text = element_text(size = 18),
+            legend.position="right",
+            legend.key.size = unit(0.50, "cm"),
+            strip.text.x = element_text(size=18, face="bold"),
+            strip.text.y = element_text(size=18, face="bold"),
+            panel.background = element_blank(),
+            panel.border = element_rect(fill = NA, colour = "black"),
+            strip.background = element_rect(colour="black"))
+
+y= z+ guides(fill = guide_legend(reverse = TRUE, ncol=1))
+
+y
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/comm_comp_island.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#comm comp by landuse
+
+d= ggplot(NZsoil_over1,aes(x=as.factor(LandUse),y=Abundance,fill=Phylum))+ geom_bar(stat="identity",position="fill") +  scale_y_continuous(labels = percent_format())
+
+b= d+ ylab("Relative Abundance")
+
+a= b+ scale_fill_manual(name="Phylum",values = c("grey26", "royalblue", "chartreuse3",  "red", "darkorange","cyan2", "darkgreen", "deepskyblue", "mediumorchid3","#89C5DA", "#DA5724", "#74D944", "#C84248", "#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030",   "#AD6F3B", "#CD9BCD", "#D14285", "#6DDE88", "#652926", "#7FDCC0", "#8569D5", "#5E738F", "#D1A33D", "#8A7C64", "#599861", "blue4", "yellow1", "violetred", "#990000", "#99CC00", "#003300", "#00CCCC", "#9966CC", "#993366", "#990033", "#4863A0", "#000033", "#330000", "#00CC99", "#00FF33", "#00CCFF", "#FF9933", "#660066", "#FF0066", "#330000", "#CCCCFF", "#3399FF", "#66FFFF", "#B5EAAA","#FFE87C"))
+
+z= a+ theme(axis.title.x = element_blank(),
+            axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18),
+            axis.text.y = element_text(colour = "black", size=18),
+            axis.title.y = element_text(face="bold",size=18),
+            plot.title = element_text(size = 18),
+            legend.title =element_text(size = 18),
+            legend.text = element_text(size = 18),
+            legend.position="right",
+            legend.key.size = unit(0.50, "cm"),
+            strip.text.x = element_text(size=18, face="bold"),
+            strip.text.y = element_text(size=18, face="bold"),
+            panel.background = element_blank(),
+            panel.border = element_rect(fill = NA, colour = "black"),
+            strip.background = element_rect(colour="black"))
+
+y= z+ guides(fill = guide_legend(reverse = TRUE, ncol=1))
+
+y
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/comm_comp_LandUse.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#comm comp by pH
+NZsoil_over1$groupedpH <-cut(NZsoil_over1$pH, breaks=c(4,4.5,5,5.5,6,6.5,Inf), labels=c("4-4.5","4.5-5","5-5.5","5.5-6","6-6.5","6.5-7"))
+
+d= ggplot(NZsoil_over1,aes(x=as.factor(groupedpH),y=Abundance,fill=Phylum))+ geom_bar(stat="identity",position="fill") +  scale_y_continuous(labels = percent_format())
+
+b= d+ ylab("Relative Abundance")
+
+a= b+ scale_fill_manual(name="Phylum",values = c("grey26", "royalblue", "chartreuse3",  "red", "darkorange","cyan2", "darkgreen", "deepskyblue", "mediumorchid3","#89C5DA", "#DA5724", "#74D944", "#C84248", "#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030",   "#AD6F3B", "#CD9BCD", "#D14285", "#6DDE88", "#652926", "#7FDCC0", "#8569D5", "#5E738F", "#D1A33D", "#8A7C64", "#599861", "blue4", "yellow1", "violetred", "#990000", "#99CC00", "#003300", "#00CCCC", "#9966CC", "#993366", "#990033", "#4863A0", "#000033", "#330000", "#00CC99", "#00FF33", "#00CCFF", "#FF9933", "#660066", "#FF0066", "#330000", "#CCCCFF", "#3399FF", "#66FFFF", "#B5EAAA","#FFE87C"))
+
+z= a+ theme(axis.title.x = element_blank(),
+            axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18),
+            axis.text.y = element_text(colour = "black", size=18),
+            axis.title.y = element_text(face="bold",size=18),
+            plot.title = element_text(size = 18),
+            legend.title =element_text(size = 18),
+            legend.text = element_text(size = 18),
+            legend.position="right",
+            legend.key.size = unit(0.50, "cm"),
+            strip.text.x = element_text(size=18, face="bold"),
+            strip.text.y = element_text(size=18, face="bold"),
+            panel.background = element_blank(),
+            panel.border = element_rect(fill = NA, colour = "black"),
+            strip.background = element_rect(colour="black"))
+
+y= z+ guides(fill = guide_legend(reverse = TRUE, ncol=1))
+
+y
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/comm_comp_pH.pdf", width = 31.2, height = 20.4, units = "cm")
+
+#comm comp by Rainfall
+
+NZsoil_over1$groupedRainfall <-cut(NZsoil_over1$Rainfall, breaks=c(0,2.5,5,7.5,10,12.5,Inf), labels=c("<2.5","2.5-5","5-7.5","7.5-10","10-12.5",">12.5"))
+
+d= ggplot(NZsoil_over1,aes(x=as.factor(groupedRainfall),y=Abundance,fill=Phylum))+ geom_bar(stat="identity",position="fill") +  scale_y_continuous(labels = percent_format())
+
+b= d+ ylab("Relative Abundance")
+
+a= b+ scale_fill_manual(name="Phylum",values = c("grey26", "royalblue", "chartreuse3",  "red", "darkorange","cyan2", "darkgreen", "deepskyblue", "mediumorchid3","#89C5DA", "#DA5724", "#74D944", "#C84248", "#673770", "#D3D93E", "#38333E", "#508578", "#D7C1B1", "#689030",   "#AD6F3B", "#CD9BCD", "#D14285", "#6DDE88", "#652926", "#7FDCC0", "#8569D5", "#5E738F", "#D1A33D", "#8A7C64", "#599861", "blue4", "yellow1", "violetred", "#990000", "#99CC00", "#003300", "#00CCCC", "#9966CC", "#993366", "#990033", "#4863A0", "#000033", "#330000", "#00CC99", "#00FF33", "#00CCFF", "#FF9933", "#660066", "#FF0066", "#330000", "#CCCCFF", "#3399FF", "#66FFFF", "#B5EAAA","#FFE87C"))
+
+z= a+ theme(axis.title.x = element_blank(),
+            axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18),
+            axis.text.y = element_text(colour = "black", size=18),
+            axis.title.y = element_text(face="bold",size=18),
+            plot.title = element_text(size = 18),
+            legend.title =element_text(size = 18),
+            legend.text = element_text(size = 18),
+            legend.position="right",
+            legend.key.size = unit(0.50, "cm"),
+            strip.text.x = element_text(size=18, face="bold"),
+            strip.text.y = element_text(size=18, face="bold"),
+            panel.background = element_blank(),
+            panel.border = element_rect(fill = NA, colour = "black"),
+            strip.background = element_rect(colour="black"))
+
+y= z+ guides(fill = guide_legend(reverse = TRUE, ncol=1))
+
+y
+
+ggsave("/Users/moraleslab/Documents/Thesis/thesis save/comm_comp_Rainfall.pdf", width = 31.2, height = 20.4, units = "cm")
+```
+
+```{r Variance partitioning }}
+library(ggplot2)
+library(vegan)
+library(plyr)
+library(dplyr)
+library(scales)
+library(reshape2)
+library(RColorBrewer)
+library(grid)
+library(phyloseq)
